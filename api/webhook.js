@@ -1,11 +1,16 @@
+// /api/webhook.js  —  提取正文 + DeepSeek 重要性判定 + 英文翻译
+//---------------------------------------------------------------
+
 import { Telegraf } from 'telegraf';
 import OpenAI       from 'openai';
 
-/* ===== DeepSeek 客户端：判定重要 ===== */
+/* ===== DeepSeek 客户端 ===== */
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
-  apiKey:  process.env.DEEPSEEK_KEY
+  apiKey:  process.env.DEEPSEEK_KEY          // 置于 Vercel 环境变量
 });
+
+/* DeepSeek 判定重要 */
 async function isImportant(text) {
   try {
     const r = await deepseek.chat.completions.create({
@@ -20,14 +25,14 @@ async function isImportant(text) {
     return r.choices[0].message.content.trim() === '1';
   } catch (e) {
     console.error('DeepSeek error', e);
-    return false;
+    return false;                             // 调用失败时默认“不重要”
   }
 }
 
-/* ===== 把一段英文翻成中文 ===== */
-async function translateEn2Zh(enText) {
+/* 英文片段翻译 */
+async function translateEn2Zh(en) {
   const url = 'https://translate.googleapis.com/translate_a/single' +
-              '?client=gtx&sl=en&tl=zh-CN&dt=t&q=' + encodeURIComponent(enText);
+              '?client=gtx&sl=en&tl=zh-CN&dt=t&q=' + encodeURIComponent(en);
   const res  = await fetch(url);
   const data = await res.json();
   return data[0].map(r => r[0]).join('');
@@ -37,46 +42,47 @@ async function translateEn2Zh(enText) {
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 bot.on('text', async ctx => {
-  const text = ctx.message.text;
-  if (ctx.from.id === ctx.botInfo.id) return;              // 过滤自己
+  const raw = ctx.message.text;
 
-  // ① 判定重要性（失败就按不重要）
-  const important = await isImportant(text);
+  /* 0. 跳过自己 */
+  if (ctx.from.id === ctx.botInfo.id) return;
 
-  // ② 若整句不含英文，只有“重要”时才提示
-  if (!/[A-Za-z]/.test(text)) {
-    if (important) await ctx.reply(`⚠️ 重要信息：\n${text}`);
-    return;
-  }
+  /* 1. 抽取正文：首个空行后的块，直到再次空行/关键字 */
+  const bodyMatch = raw.match(/\n\s*\n([\s\S]+?)(?:\n\s*\n|点击查看|时间|🎉|$)/);
+  const body = bodyMatch ? bodyMatch[1].trim() : '';
 
-  /* ③ 提取所有英文片段并逐段翻译 */
-  const enRegex = /[A-Za-z0-9#@\$%\^&\*\-_\+=\[\]\(\)\.,"'\/\\:;?!\s]{4,}/g; // 长度≥4 的连续英文
-  const pieces  = text.match(enRegex);
-  if (!pieces) return;                                     // 理论不会发生
+  if (!body) return;                          // 未抓到正文就忽略
 
-  let translated = text;
-  for (const en of pieces) {
-    try {
-      const zh = await translateEn2Zh(en);
-      // 若 Google 真的给了中文，就替换；否则保持英文
-      if (zh && zh !== en) {
-        translated = translated.replace(en, zh);
+  /* 2. 判定重要性 */
+  const important = await isImportant(body);
+  const prefix    = important ? '⚠️ 重要信息' : 'ℹ️ 信息';
+
+  /* 3. 翻译正文中英文片段（长度≥4 的连续英文/符号） */
+  let reply = body;
+  const enRegex = /[A-Za-z0-9#@\$%\^&\*\-_\+=\[\]\(\)\.,"'\/\\:;?!\s]{4,}/g;
+  const pieces  = body.match(enRegex);
+
+  if (pieces) {
+    for (const en of pieces) {
+      if (!/[A-Za-z]/.test(en)) continue;     // 纯符号/空白跳过
+      try {
+        const zh = await translateEn2Zh(en);
+        if (zh && zh !== en) {
+          reply = reply.replace(en, zh);
+        }
+      } catch (e) {
+        console.error('Translate piece failed', e);
       }
-    } catch (e) {
-      console.error('translate piece failed', e);
     }
   }
 
-  // ④ 只要译文和原文有区别就发送
-  if (translated !== text) {
-    if (important) await ctx.reply('⚠️ 重要信息（已翻译如下）');
-    await ctx.reply(translated);
-  }
+  /* 4. 发送提醒 + 结果（即使译文与原文相同也发送） */
+  await ctx.reply(`${prefix}：\n${reply}`);
 });
 
 /* ===== Vercel Webhook 入口 ===== */
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(200).send('OK');
+  if (req.method !== 'POST') return res.status(200).send('OK'); // 健康检查
   try {
     await bot.handleUpdate(req.body);
     res.status(200).send('ok');
@@ -85,3 +91,5 @@ export default async function handler(req, res) {
     res.status(500).send('bot error');
   }
 }
+
+// ⚠️ 无需 bot.launch() —— Webhook 场景下禁止使用长轮询
