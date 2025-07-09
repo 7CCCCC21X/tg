@@ -1,7 +1,7 @@
 {
   "name": "tg-vercel-bot",
   "version": "1.0.0",
-  "description": "Telegram 翻译机器人（Vercel Serverless Functions）",
+  "description": "Telegram 英译中 + DeepSeek 重要性判定（Vercel Serverless）",
   "private": true,
   "type": "module",
   "engines": {
@@ -19,10 +19,10 @@
   "keywords": [
     "telegram",
     "bot",
-    "telegraf",
+    "translate",
+    "deepseek",
     "vercel",
-    "serverless",
-    "deepseek"
+    "serverless"
   ],
   "license": "MIT"
 }
