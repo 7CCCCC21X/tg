@@ -1,16 +1,16 @@
-// /api/webhook.js —— 以 Webhook 方式运行的 Telegram 机器人
-// -------------------------------------------------------------
+// /api/webhook.js —— DeepSeek 判重要 + 英文译中文
+//--------------------------------------------------
 
 import { Telegraf } from 'telegraf';
 import OpenAI       from 'openai';
 
-/* ---------- DeepSeek 客户端（兼容 OpenAI SDK） ---------- */
+/* ===== DeepSeek 客户端 ===== */
 const deepseek = new OpenAI({
   baseURL: 'https://api.deepseek.com',
-  apiKey:  process.env.DEEPSEEK_KEY         // ← 在 Vercel 环境变量里配置
+  apiKey:  process.env.DEEPSEEK_KEY
 });
 
-/* 判断消息是否重要：返回 true / false */
+/* 判断消息是否重要：true / false */
 async function isImportant(text) {
   const resp = await deepseek.chat.completions.create({
     model: 'deepseek-reasoner',
@@ -24,26 +24,29 @@ async function isImportant(text) {
   return resp.choices[0].message.content.trim() === '1';
 }
 
-/* ---------- Telegram Bot ---------- */
+/* ===== Telegram Bot ===== */
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 bot.on('text', async ctx => {
   const text = ctx.message.text;
-  if (ctx.from.is_bot) return;                       // 防止自循环
 
-  // 1) 判断重要性
+  /* 过滤掉自己 */
+  if (ctx.from.id === ctx.botInfo.id) return;
+
+  /* 判断重要性（失败默认不重要） */
   let important = false;
   try {
     important = await isImportant(text);
   } catch (err) {
-    console.error('DeepSeek 判断失败:', err);
+    console.error('DeepSeek error:', err);
   }
 
-  // 2) 若包含英文字母 → 必翻译
+  /* 只翻译包含英文的消息 */
   if (/[A-Za-z]/.test(text)) {
     try {
       const url = 'https://translate.googleapis.com/translate_a/single' +
-                  '?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' + encodeURIComponent(text);
+                  '?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' +
+                  encodeURIComponent(text);
       const res  = await fetch(url);
       const data = await res.json();
       const zh   = data[0].map(r => r[0]).join('');
@@ -53,17 +56,17 @@ bot.on('text', async ctx => {
         await ctx.reply(zh);
       }
     } catch (err) {
-      console.error('翻译失败:', err);
+      console.error('Translate error:', err);
     }
   } else if (important) {
-    // 3) 原文无英文但被判定为重要 → 直接提示
+    /* 中文但被判重要 → 直接提示 */
     await ctx.reply(`⚠️ 重要信息：\n${text}`);
   }
 });
 
-/* ---------- Vercel Serverless 入口 ---------- */
+/* ===== Vercel Webhook 入口 ===== */
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(200).send('OK'); // 健康检查
+  if (req.method !== 'POST') return res.status(200).send('OK');
   try {
     await bot.handleUpdate(req.body);
     res.status(200).send('ok');
@@ -72,5 +75,3 @@ export default async function handler(req, res) {
     res.status(500).send('bot error');
   }
 }
-
-// ★ 不要调用 bot.launch() —— Webhook 场景无需长轮询
