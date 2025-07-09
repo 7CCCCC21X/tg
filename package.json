@@ -1,0 +1,27 @@
+{
+  "name": "tg-vercel-bot",
+  "version": "1.0.0",
+  "description": "Telegram 翻译机器人（Vercel Serverless Functions）",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "vercel dev --listen 3000",
+    "start": "node api/webhook.js",
+    "deploy": "vercel --prod"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "telegraf",
+    "vercel",
+    "serverless"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "telegraf": "^4.17.1"
+  }
+}
